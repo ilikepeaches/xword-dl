@@ -62,22 +62,73 @@ def remove_invalid_chars_from_filename(filename: str):
     return filename
 
 
-def cleanup(field: str, preserve_html=False):
+PUNCTUATION_TRANS = str.maketrans({
+    "“": '"',
+    "”": '"',
+    "‘": "'",
+    "’": "'",
+    "‹": "'",
+    "›": "'",
+    "—": "--",
+    "–": "-",
+    "‐": "-",
+    "‑": "-",
+    "−": "-",
+    "…": "...",
+    "\u2002": " ",
+    "\u2003": " ",
+    "\u2009": " ",
+    "\u200a": " ",
+    "\u202f": " ",
+})
+
+
+def can_encode_latin1(text: str) -> bool:
+    if not text:
+        return True
+    normalized = text.translate(PUNCTUATION_TRANS)
+    try:
+        normalized.encode("latin-1")
+        return True
+    except UnicodeEncodeError:
+        return False
+
+
+def cleanup(field: str, preserve_html=False, utf8=False):
+    if not field:
+        return ""
     if preserve_html:
-        field = unidecode(emoji.demojize(field)).strip()
+        field = emoji.demojize(field).strip()
     else:
-        field = unidecode(emoji.demojize(html2text(field, bodywidth=0))).strip()
+        field = emoji.demojize(html2text(field, bodywidth=0)).strip()
+    if not utf8:
+        field = unidecode(field).strip()
     return field
 
 
-def sanitize_for_puzfile(puzzle: Puzzle, preserve_html=False) -> Puzzle:
-    puzzle.title = cleanup(puzzle.title, preserve_html)
-    puzzle.author = cleanup(puzzle.author, preserve_html)
-    puzzle.copyright = cleanup(puzzle.copyright, preserve_html)
+def sanitize_for_puzfile(puzzle: Puzzle, preserve_html=False, force_utf8=False) -> Puzzle:
+    all_texts = [
+        puzzle.title,
+        puzzle.author,
+        puzzle.copyright,
+        puzzle.notes,
+        getattr(puzzle, "solution", ""),
+        getattr(puzzle, "fill", ""),
+    ] + (puzzle.clues or [])
 
-    puzzle.notes = cleanup(puzzle.notes, preserve_html)
+    needs_utf8 = force_utf8 or any(not can_encode_latin1(t) for t in all_texts if t)
 
-    puzzle.clues = [cleanup(clue, preserve_html) for clue in puzzle.clues]
+    if needs_utf8:
+        puzzle.set_version("2.0")
+        puzzle.encoding = "UTF-8"
+
+    puzzle.title = cleanup(puzzle.title, preserve_html, utf8=needs_utf8)
+    puzzle.author = cleanup(puzzle.author, preserve_html, utf8=needs_utf8)
+    puzzle.copyright = cleanup(puzzle.copyright, preserve_html, utf8=needs_utf8)
+
+    puzzle.notes = cleanup(puzzle.notes, preserve_html, utf8=needs_utf8)
+
+    puzzle.clues = [cleanup(clue, preserve_html, utf8=needs_utf8) for clue in puzzle.clues]
 
     return puzzle
 
